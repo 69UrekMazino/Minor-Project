@@ -1,0 +1,47 @@
+import cv2
+import os
+
+cam = cv2.VideoCapture(0)
+cam.set(3, 640) # set video width
+cam.set(4, 480) # set video height
+
+face_detector = cv2.CascadeClassifier(cv2.data.haarcascades +'haarcascade_frontalface_default.xml')
+
+# Ask user for directory name
+dir_name = input('\nEnter the directory name to save the phone images: ')
+
+# Create the dataset directory if it doesn't exist
+if not os.path.exists('dataset'):
+    os.makedirs('dataset')
+
+# Create the user directory inside the dataset directory
+user_dir_path = os.path.join('dataset', dir_name)
+if not os.path.exists(user_dir_path):
+    os.makedirs(user_dir_path)
+
+# For each person, enter one numeric face id
+examinee_id = input('\nEnter examinee id and press enter ==> ')
+print("\n [INFO] Initializing face capture. Look at the camera and wait ...")
+
+# Initialize individual sampling face count
+count = 0
+
+while True:
+    ret, img = cam.read()
+    faces = face_detector.detectMultiScale(img, scaleFactor=1.3, minNeighbors=5)
+
+    for (x, y, w, h) in faces:
+        cv2.rectangle(img, (x,y), (x+w,y+h), (255,0,0), 2)
+        count += 1
+        # Save the captured image into the user directory
+        cv2.imwrite(os.path.join(user_dir_path, f"examinee.{examinee_id}.{count}.jpg"), img[y:y+h,x:x+w])
+        cv2.imshow('image', img)
+
+    k = cv2.waitKey(100) & 0xff # Press 'ESC' for exiting video
+    if k == 27 or count >=20: # Take 15 face samples and stop video
+         break
+
+# Do a bit of cleanup
+print("\n [INFO] Exiting Program and cleanup stuff")
+cam.release()
+cv2.destroyAllWindows()

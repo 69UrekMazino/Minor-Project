@@ -1,0 +1,138 @@
+import cv2
+import torch
+import torch.nn.functional as F
+from torchvision import transforms
+import torch.nn as nn
+import numpy as np
+from PIL import Image
+
+# Define the CNN model
+class CNN(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv_layers = nn.Sequential(
+            # conv1
+            nn.Conv2d(in_channels=3, out_channels=32, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(32),
+            nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(32),
+            nn.MaxPool2d(2),
+            # conv2
+            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(64),
+            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(64),
+            nn.MaxPool2d(2),
+            # conv3
+            nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(128),
+            nn.Conv2d(in_channels=128, out_channels=128, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(128),
+            nn.MaxPool2d(2),
+            # conv4
+            nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(256),
+            nn.Conv2d(in_channels=256, out_channels=256, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(256),
+            nn.MaxPool2d(2),
+        )
+
+        self.dense_layers = nn.Sequential(
+            nn.Dropout(0.4),
+            nn.Linear(50176, 1024),
+            nn.ReLU(),
+            nn.Dropout(0.4),
+            nn.Linear(1024, 12),
+        )
+
+    def forward(self, X):
+        out = self.conv_layers(X)
+
+        # Flatten
+        out = out.view(out.size(0), -1)
+
+        # Fully connected
+        out = self.dense_layers(out)
+
+        return out
+
+# Load the pre-trained model
+model = CNN()
+model.load_state_dict(torch.load('C:/Users/Acer/Desktop/FACER/Face.pt'))
+
+# Set the device to run the model on
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+model.to(device)
+model.eval()
+
+# Define the preprocessing transformations
+transform = transforms.Compose(
+    [transforms.Resize((224,224)), transforms.ToTensor()]
+)
+
+# Initialize the video capture object
+cap = cv2.VideoCapture(0)
+
+# Initialize the face detection cascade classifier
+cascadePath = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+face_cascade = cv2.CascadeClassifier(cascadePath)
+font = cv2.FONT_HERSHEY_SIMPLEX
+
+# Loop over the frames from the webcam
+while True:
+    # Read a frame from the webcam
+    ret, frame = cap.read()
+
+    # Convert the frame to grayscale
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+    # Detect the faces in the frame
+    faces = face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5)
+
+    # Loop over the faces in the frame
+    for (x, y, w, h) in faces:
+    # Crop the face from the frame and resize it to (224,224)
+      face_img = frame[y:y+h, x:x+w]
+      face_img = cv2.resize(face_img, (224,224))
+    
+    # Preprocess the face image
+    img = Image.fromarray(face_img)
+    img = transform(img)
+    img = img.unsqueeze(0)
+    img = img.to(device)
+
+    # Make a prediction using the pre-trained model
+    with torch.no_grad():
+     output = model(img)
+    _, predicted = torch.max(output.data, 1)
+    prediction = predicted.item()
+    
+# Get the name corresponding to the predicted label
+    names = [ 'Arnold_Schwarzenegger','Dipsan_Khakurl','Mishan_Rajbhandari','Peris_KC','Prabhas_Gyawali','Pranesh_Shrestha','Shrijan_Pandey','Subash_Limbu','Sujal_Gupta','Sylvester_Stallone','Tiger_Woods','Zinedine_Zidane','unknown']
+    predicted_name = names[prediction]
+    probability = F.softmax(output, dim=1)[0][prediction].item()
+
+# Draw a rectangle around the face and show the predicted name below it
+    for (x,y,w,h) in faces:
+     cv2.rectangle(frame, (x,y), (x+w,y+h), (255,0,0), 2)
+     cv2.putText(frame, predicted_name, (x,y+h+30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255,0,0), 2)
+     cv2.putText(frame, predicted_name + ' ({:.2f}%)'.format(probability * 100), (x, y + h + 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 0, 0), 2)
+    
+
+# Display the resulting frame
+    cv2.imshow('frame', frame)
+
+# Quit the program when 'q' is pressed
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+      break
+#Release the video capture object and close the window
+cap.release()
+cv2.destroyAllWindows()

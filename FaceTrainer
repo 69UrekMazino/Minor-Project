@@ -1,0 +1,284 @@
+import torch
+import torchvision
+from torchvision import datasets,transforms,models
+import numpy as np 
+import pandas as pd 
+import matplotlib.pyplot as plt
+import os
+from torchvision.datasets import ImageFolder
+from torch.utils.data import random_split
+from torch.utils.data.sampler import SubsetRandomSampler
+import torch.nn as nn
+import torch.nn.functional as F
+from datetime import datetime
+import torch.optim as optim
+from torchsummary import summary
+
+
+#Dataset path
+data_dir = r'C:\Users\Acer\Desktop\FACER\dataset'
+
+
+#transforming using pytorch methods
+transformer = transforms.Compose(
+    [transforms.Resize(255), transforms.CenterCrop(224), transforms.ToTensor()]
+)
+database = ImageFolder(data_dir, transform=transformer)
+
+database
+
+indices = list(range(len(database)))
+training_size = int(np.floor(0.77*len(database)))
+test_size = int(np.floor(0.12*len(database)))
+validation_size = len(database)-training_size-test_size
+np.random.shuffle(indices)
+print(training_size, validation_size, test_size, len(database))
+
+train_indices, validation_indices,test_indices = (
+    indices[:training_size],
+    indices[training_size:(training_size+validation_size)],
+    indices[(training_size+validation_size):]
+)
+
+train_sampler = SubsetRandomSampler(train_indices)
+validation_sampler = SubsetRandomSampler(validation_indices)
+test_sampler = SubsetRandomSampler(test_indices)
+targets_size = len(database.class_to_idx)
+
+#Initializing batch size and creating list of batches in train and test datasets
+batch_size =16
+train_loader = torch.utils.data.DataLoader(database, batch_size=batch_size,sampler=train_sampler)
+validation_loader = torch.utils.data.DataLoader(database, batch_size=batch_size,sampler=validation_sampler)
+test_loader=torch.utils.data.DataLoader(database, batch_size=batch_size,sampler=test_sampler)
+
+classes=('Arnold_Schwarzenegger','Dipsan_Khakurl','Mishan_Rajbhandari','Peris_KC','Prabhas_Gyawali','Pranesh_Shrestha','Shrijan_Pandey','Subash_Limbu','Sujal_Gupta','Sylvester_Stallone','Tiger_Woods','Zinedine_Zidane')
+
+#Showing random images from a single random batch in a grid format
+def imshow(img):
+    img = img / 2 + 0.5     # unnormalize
+    npimg = img.numpy()
+    fig, ax = plt.subplots(figsize=(25, 25))
+    plt.imshow(np.transpose(npimg, (1, 2, 0)))
+    plt.show()
+
+
+# get some random training images
+dataiter = iter(train_loader)
+images, labels = next(dataiter)
+
+# show images
+imshow(torchvision.utils.make_grid(images))
+# print labels
+print(' '.join(f'{classes[labels[j]]:5s}' for j in range(batch_size)))
+
+class CNN(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv_layers = nn.Sequential(
+            # conv1
+            nn.Conv2d(in_channels=3, out_channels=32, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(32),
+            nn.Conv2d(in_channels=32, out_channels=32, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(32),
+            nn.MaxPool2d(2),
+            # conv2
+            nn.Conv2d(in_channels=32, out_channels=64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(64),
+            nn.Conv2d(in_channels=64, out_channels=64, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(64),
+            nn.MaxPool2d(2),
+            # conv3
+            nn.Conv2d(in_channels=64, out_channels=128, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(128),
+            nn.Conv2d(in_channels=128, out_channels=128, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(128),
+            nn.MaxPool2d(2),
+            # conv4
+            nn.Conv2d(in_channels=128, out_channels=256, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(256),
+            nn.Conv2d(in_channels=256, out_channels=256, kernel_size=3, padding=1),
+            nn.ReLU(),
+            nn.BatchNorm2d(256),
+            nn.MaxPool2d(2),
+        )
+
+        self.dense_layers = nn.Sequential(
+            nn.Dropout(0.4),
+            nn.Linear(50176, 1024),
+            nn.ReLU(),
+            nn.Dropout(0.4),
+            nn.Linear(1024, 12),
+        )
+
+    def forward(self, X):
+        out = self.conv_layers(X)
+
+        # Flatten
+        out = out.view(-1, 50176)
+
+        # Fully connected
+        out = self.dense_layers(out)
+
+        return out
+
+model=CNN()
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(device)
+model.to(device)
+
+summary(model,(3,224,224))
+
+#creating optimizer
+criterion = nn.CrossEntropyLoss()
+optimizer=torch.optim.Adam(model.parameters())
+
+def batch_gd(model, criterion, train_loader, validation_loader, epochs):
+    train_losses = np.zeros(epochs)
+    validation_losses = np.zeros(epochs)
+    train_accs = np.zeros(epochs)
+    validation_accs = np.zeros(epochs)
+
+    for e in range(epochs):
+
+        t0 = datetime.now()
+        train_loss = []
+        train_acc = []
+        for inputs, targets in train_loader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            optimizer.zero_grad()
+            output = model(inputs)
+            loss = criterion(output, targets)
+            train_loss.append(loss.item())
+            _, predicted = torch.max(output.data, 1)
+            correct = (predicted == targets).sum().item()
+            acc = correct / len(targets)
+            train_acc.append(acc)
+            loss.backward()
+            optimizer.step()
+
+        train_loss = np.mean(train_loss)
+        train_acc = np.mean(train_acc)
+
+        validation_loss = []
+        validation_acc = []
+        for inputs, targets in validation_loader:
+            inputs, targets = inputs.to(device), targets.to(device)
+            output = model(inputs)
+            loss = criterion(output, targets)
+            validation_loss.append(loss.item())
+            _, predicted = torch.max(output.data, 1)
+            correct = (predicted == targets).sum().item()
+            acc = correct / len(targets)
+            validation_acc.append(acc)
+            loss.backward()
+            optimizer.step()
+
+        validation_loss = np.mean(validation_loss)
+        validation_acc = np.mean(validation_acc)
+
+        train_losses[e] = train_loss
+        validation_losses[e] = validation_loss
+        train_accs[e] = train_acc
+        validation_accs[e] = validation_acc
+
+        dt = datetime.now() - t0
+
+        print(f"Epoch:{e+1}/{epochs}\tTL:{train_loss:.3f}\tVL:{validation_loss:.3f}\tTA:{train_acc:.3f}\tVA:{validation_acc:.3f}\tDuration:{dt}")
+
+
+
+    return train_losses, validation_losses, train_accs, validation_accs
+
+
+train_losses, validation_losses, train_accs, validation_accs = batch_gd(model, criterion, train_loader, validation_loader, 20)
+#plot for the loss
+plt.plot(train_losses,'b' , label = 'train_loss')
+plt.plot(validation_losses,'r',label='validation_loss')
+plt.xlabel('No of Epochs')
+plt.ylabel('Loss')
+plt.legend()
+plt.show()
+
+#plot for the accuracy
+plt.plot(train_accs, label='Training Accuracy')
+plt.plot(validation_accs, label='Validation Accuracy')
+plt.xlabel('Epoch')
+plt.ylabel('Accuracy')
+plt.title('Accuracy Graph')
+plt.legend()
+plt.show()
+
+torch.save(model.state_dict(),"Face.pt")
+
+model=CNN()
+model.load_state_dict(torch.load("Face.pt"))
+model.eval()
+
+def accuracy(loader):
+    n_correct = 0
+    n_total = 0
+    model.cpu()
+    for inputs, targets in loader:
+        inputs, targets = inputs.cpu(), targets.cpu()
+
+        outputs = model(inputs)
+
+        _, predictions = torch.max(outputs, 1)
+
+        n_correct += (predictions == targets).sum().item()
+        n_total += targets.shape[0]
+
+    acc = n_correct / n_total
+    return acc
+
+train_acc = accuracy(train_loader)
+validation_acc = accuracy(validation_loader)
+
+print(
+    f"Train Accuracy : {train_acc*100} %\nValidation Accuracy : {validation_acc*100} %"
+)
+
+#showing random test images
+dataiter = iter(test_loader)
+images, labels = next(dataiter)
+
+# print images
+imshow(torchvision.utils.make_grid(images))
+print('GroundTruth: ', ' '.join(f'{classes[labels[j]]:5s}' for j in range(batch_size)))
+
+outputs = model(images)
+
+
+_, predicted = torch.max(outputs, 1)
+
+print('Predicted: ', ' '.join(f'{classes[predicted[j]]:5s}'
+                              for j in range(batch_size)))
+
+test_results = pd.DataFrame(columns = ['Actual_Image','Predicted_Image'])
+Actual_Image= pd.Series(name='Actual_Image',dtype = str)
+Predicted_Image= pd.Series(name='Predicted_Image',dtype = str)
+correct = 0
+total = 0
+# since we're not training, we don't need to calculate the gradients for our outputs
+with torch.no_grad():
+    for data in test_loader:
+        images, labels = data
+        # calculate outputs by running images through the network
+        outputs = model(images)
+        # the class with the highest energy is what we choose as prediction
+        _, predicted = torch.max(outputs.data, 1)
+        Actual_Image = pd.concat([Actual_Image, pd.Series(labels.tolist(), name='Actual_Image')], ignore_index=True)
+        Predicted_Image = pd.concat([Predicted_Image, pd.Series(predicted.tolist(), name='Predicted_Image')], ignore_index=True)
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+
+print(f'Test accuracy : {100 * correct / total} %')
+
